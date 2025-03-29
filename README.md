@@ -9,11 +9,13 @@ We propose an integrative modelling approach using graph neural networks (GNNs) 
 
 ## Project Overview
 The pipeline combines:
--GNNs to model high-order spatial dependencies in cell-cell interactions, using both intrinsic (copy number alterations) and extrinsic (cell type proximity) features.
--Spatial regression models including:
-  -Spatial Error Models (SEM) 
-  -Geographically Weighted Regression (GWR) for localised coefficients
-  -Multiscale GWR (MGWR) for variable-specific spatial scales
+- `emt_plasticity_analysis/` – GNN-based modelling of EMT states using Xenium data  
+- `figure_plotting/` – Scripts for generating figures used in the manuscript  
+- `merfish_analysis/` – Benchmarking the GNN prediction pipeline on MERFISH mouse brain data  
+- `source_data/` – Processed Xenium data with cell type and EMT annotations  
+- `spatial_regression/` – Code for spatial regression analyses (SEM, GWR, MGWR)  
+- `LICENSE`  
+- `README.md`  
 
 These methods are applied to:
 -Breast cancer Xenium spatial transcriptomics data for EMT modelling
