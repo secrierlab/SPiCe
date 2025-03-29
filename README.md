@@ -1,1 +1,1 @@
-# Spatial_predictive_modelling
+# Spatial predictive modelling
