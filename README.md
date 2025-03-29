@@ -4,14 +4,11 @@
 
 We propose an integrative modelling approach using graph neural networks (GNNs) and geostatistical regression models to disentangle the influence of intrinsic (e.g. genomic alterations) and extrinsic (e.g. tumor microenvironment, TME) factors in driving cell plasticity, with a focus on epithelial-mesenchymal plasticity (EMP).
 
-## Repository Structure
-. ├── emt_plasticity_analysis/ # GNN-based modelling of EMT states using Xenium data ├── figure_plotting/ # Scripts for generating figures used in the manuscript ├── merfish_analysis/ # Benchmarking the GNN prediction pipeline on MERFISH mouse brain data ├── source_data/ # Processed Xenium data with cell type and EMT annotations ├── spatial_regression/ # Code for spatial regression analyses (SEM, GWR, MGWR) ├── LICENSE └── README.md
-
 ## Project Overview
 The pipeline combines:
-- `emt_plasticity_analysis/` – GNN-based modelling of EMT states using Xenium data  
+- `emt_plasticity_analysis/` – GNN-based modelling of EMT states using Xenium data. Use analysis.ipynb to run scripts.  
 - `figure_plotting/` – Scripts for generating figures used in the manuscript  
-- `merfish_analysis/` – Benchmarking the GNN prediction pipeline on MERFISH mouse brain data  
+- `merfish_analysis/` – Benchmarking the GNN prediction pipeline on MERFISH mouse brain data. Use analysis.ipynb to run scripts.  
 - `source_data/` – Processed Xenium data with cell type and EMT annotations  
 - `spatial_regression/` – Code for spatial regression analyses (SEM, GWR, MGWR)  
 - `LICENSE`  
