@@ -1,4 +1,4 @@
-# Spatial Plasticity in Cellular Environments (SPiCe):
+# Spatial Plasticity in Cellular Environments (SPiCe)
 
 ## A computational framework for modelling intrinsic and extrinsic factors driving cell plasticity using spatial transcriptomics
 
