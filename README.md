@@ -1,4 +1,4 @@
-# Spatial predictive modelling
+# Spatial predictive modelling of cellular plasticity
 
 ## A Computational Framework for Quantifying Intrinsic and Extrinsic Factors Driving Cell Plasticity Using Spatial Transcriptomics.
 
