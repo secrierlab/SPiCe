@@ -17,7 +17,9 @@ The pipeline combines:
 - `README.md`  
 
 These methods are applied to:
+
 -Breast cancer Xenium spatial transcriptomics data for EMT modelling
+
 -MERFISH mouse brain data as a benchmark for spatial predictability
 
 ## Environment Setup
