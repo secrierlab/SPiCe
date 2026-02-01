@@ -28,6 +28,7 @@ def assign_one_hot_celltype(G, attribute='celltype_minor'):
     for node in G.nodes():
         cell_type = G.nodes[node][attribute]
         one_hot = lb.transform([cell_type])[0]
+        #updates in place
         G.nodes[node]['one_hot_Cell_Type'] = one_hot
     return lb
 

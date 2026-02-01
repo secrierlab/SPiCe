@@ -32,6 +32,9 @@ dependencies:
   - torchvision
   - torchaudio
 
+  - esda
+  - libpysal
+
   - pip:
       - torch-geometric
       - captum
