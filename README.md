@@ -2,7 +2,7 @@
 
 ## A computational framework for modelling intrinsic and extrinsic factors driving cell plasticity using spatial transcriptomics
 
-## Author: Eloise Withnell
+## Authors: Eloise Withnell, Cenk Celik
 
 We propose an integrative modelling approach using graph neural networks (GNNs) and geostatistical regression models to disentangle the influence of intrinsic (e.g. genomic alterations) and extrinsic (e.g. tumor microenvironment, TME) factors in driving cell plasticity, with a focus on epithelial-mesenchymal plasticity (EMP).
 
