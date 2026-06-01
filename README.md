@@ -4,7 +4,7 @@ A computational framework for modelling intrinsic and extrinsic factors driving 
 
 SPiCe formalizes *state predictability* as a quantitative proxy for plasticity: stable cell states are predictable from their spatial neighborhood, while plastic states are not.
 
-**Original implementation:** [Eloise Withnell](https://github.com/elliewith) (scipts).
+**Original implementation:** [Eloise Withnell](https://github.com/elliewith) (scripts).
 
 **Package conversion:** [Cenk Celik](https://github.com/cenk-celik) restructured the codebase into an installable Python package.
 
