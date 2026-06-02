@@ -642,6 +642,12 @@ def sanitize(
         if parts:
             s["edge_explanations"] = pd.concat(parts, ignore_index=True)
 
+    # Ensure cell_type_pair column is string-typed (older runs stored
+    # tuples which h5py cannot serialise).
+    edge_df = s.get("edge_explanations")
+    if isinstance(edge_df, pd.DataFrame) and "cell_type_pair" in edge_df.columns:
+        edge_df["cell_type_pair"] = edge_df["cell_type_pair"].astype(str)
+
     # Ensure the "class" column in auc DataFrame is string-typed so
     # h5py can serialise it (older runs stored integers mixed with
     # "micro"/"macro" strings, giving an object column).

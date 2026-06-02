@@ -160,7 +160,7 @@ def explain_edges_core(
             target_vals = [e.get(pair, 0) for e in importances["target"]]
             _, p = ttest_ind(target_vals, perm_vals, alternative="greater")
             records.append({
-                "cell_type_pair": pair,
+                "cell_type_pair": str(pair),
                 "mean_importance_target": np.mean(target_vals),
                 "mean_importance_permutation": np.mean(perm_vals),
                 "p_value": p,
