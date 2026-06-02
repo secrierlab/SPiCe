@@ -314,7 +314,7 @@ def auc_per_class(
     df = _require(adata, "auc", "evaluate").copy()
     state_map = state_map or {}
 
-    per_class = df[df["class"].apply(lambda x: isinstance(x, (int, np.integer)))]
+    per_class = df[~df["class"].isin(["micro", "macro"])]
     per_class = per_class.copy()
     per_class["state"] = per_class["class"].map(state_map)
     if per_class["state"].isna().any():
