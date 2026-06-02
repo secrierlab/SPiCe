@@ -113,22 +113,28 @@ class SpatialGNNDataset(InMemoryDataset):
             pca_key=self.pca_key,
             n_pcs=self.n_pcs,
         )
-        data_x = torch.tensor(x, dtype=torch.float)
+        data_x = torch.from_numpy(x)  # x is already float32
+
+        # Extract all node attributes once to avoid repeated dict lookups
+        nodes = list(self.graph.nodes())
+        node_data = self.graph.nodes
 
         # Labels
         if self.continuous_y:
             y_raw = np.array(
-                [self.graph.nodes[n].get(self.score_key, np.nan) for n in self.graph.nodes()]
+                [node_data[n].get(self.score_key, np.nan) for n in nodes],
+                dtype=np.float64,
             )
-            y_raw = np.round(y_raw, 5)
+            np.round(y_raw, 5, out=y_raw)
             y_raw[np.isnan(y_raw)] = -1
-            data_y = torch.tensor(y_raw, dtype=torch.float)
+            data_y = torch.from_numpy(y_raw).float()
         else:
             y_raw = np.array(
-                [self.graph.nodes[n].get("labels", -1) for n in self.graph.nodes()]
+                [node_data[n].get("labels", -1) for n in nodes],
+                dtype=np.float64,
             )
             y_raw[np.isnan(y_raw)] = -1
-            data_y = torch.tensor(y_raw, dtype=torch.long)
+            data_y = torch.from_numpy(y_raw.astype(np.int64))
 
         # Edges
         edge_index, edge_attr = create_edge_index(self.graph, edge_lengths=self.edge_weights)
@@ -141,12 +147,8 @@ class SpatialGNNDataset(InMemoryDataset):
         data.continuous_score_bool = self.continuous_y
 
         # Cell IDs and sample info
-        data.cell_id = np.array(
-            [self.graph.nodes[n].get("cell_id", n) for n in self.graph.nodes()]
-        )
-        samples = np.array(
-            [self.graph.nodes[n].get("sample", np.nan) for n in self.graph.nodes()]
-        )
+        data.cell_id = np.array([node_data[n].get("cell_id", n) for n in nodes])
+        samples = np.array([node_data[n].get("sample", np.nan) for n in nodes])
         data.samples = samples
 
         # Cross-validation masks
@@ -189,19 +191,15 @@ class SpatialGNNDataset(InMemoryDataset):
         n = self.graph.number_of_nodes()
 
         if self.inductive_split and self.batch_index_to_test is not None:
-            test_set = set(self.batch_index_to_test)
-            test_mask = torch.tensor(
-                [samples[i] in test_set for i in range(n)], dtype=torch.bool
-            )
+            test_mask = torch.from_numpy(np.isin(samples, self.batch_index_to_test))
             train_mask = ~test_mask
         else:
-            node_list = list(range(n))
             kf = KFold(n_splits=self.num_folds, shuffle=True, random_state=42)
-            folds = list(kf.split(node_list))
+            folds = list(kf.split(np.arange(n)))
             train_idx, test_idx = folds[self.fold_idx - 1]
-            train_idx_set = set(train_idx)
-            test_idx_set = set(test_idx)
-            train_mask = torch.tensor([i in train_idx_set for i in range(n)], dtype=torch.bool)
-            test_mask = torch.tensor([i in test_idx_set for i in range(n)], dtype=torch.bool)
+            train_mask = torch.zeros(n, dtype=torch.bool)
+            test_mask = torch.zeros(n, dtype=torch.bool)
+            train_mask[train_idx] = True
+            test_mask[test_idx] = True
 
         return train_mask, test_mask

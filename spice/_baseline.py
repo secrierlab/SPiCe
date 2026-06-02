@@ -61,17 +61,16 @@ def _extract(fold_data, graph):
     te = fold_data.test_mask.cpu().numpy()
     X = fold_data.x.cpu().numpy()
     y = fold_data.y.cpu().numpy()
-    coords = np.array([
-        [graph.nodes[n]["array_row"], graph.nodes[n]["array_col"]]
-        for n in graph.nodes()
-    ])
+    nodes = list(graph.nodes())
+    node_data = graph.nodes
+    coords = np.array([[node_data[n]["array_row"], node_data[n]["array_col"]]
+                        for n in nodes])
     return X, y, coords, tm, te
 
 
 def _augment(X, coords, k):
-    nbrs = NearestNeighbors(n_neighbors=k + 1, algorithm="ball_tree").fit(coords)
+    nbrs = NearestNeighbors(n_neighbors=k + 1, algorithm="kd_tree").fit(coords)
     _, idx = nbrs.kneighbors(coords)
-    nmean = np.zeros_like(X)
-    for i in range(len(X)):
-        nmean[i] = X[idx[i, 1:]].sum(axis=0)
+    # Vectorised neighbour feature sum (replaces per-cell Python loop)
+    nmean = X[idx[:, 1:]].sum(axis=1)
     return np.hstack([X, nmean])

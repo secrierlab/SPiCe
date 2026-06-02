@@ -23,6 +23,12 @@ def explain_nodes_core(
     unique_labels = test_labels_index["Label"].unique()
     attributions = {}
 
+    # Pre-compute shared captum inputs (edge_index etc. are the same for
+    # every target node — only the index argument changes).
+    inputs, fwd_args = to_captum_input(
+        data.x, data.edge_index, mask_type, data.edge_attr,
+    )
+
     for label in unique_labels:
         print(f"Computing node explanations for label {label}...")
         indices = test_labels_index.loc[
@@ -36,9 +42,6 @@ def explain_nodes_core(
             if int(data.y[idx]) != label:
                 continue
             captum_model = to_captum_model(model, mask_type, idx)
-            inputs, fwd_args = to_captum_input(
-                data.x, data.edge_index, mask_type, data.edge_attr,
-            )
             ig = IntegratedGradients(captum_model)
             attr = ig.attribute(
                 inputs=inputs, target=int(data.y[idx]),
@@ -56,9 +59,6 @@ def explain_nodes_core(
     for idx in tqdm(perm_sampled, desc="Permutation"):
         idx = int(idx)
         captum_model = to_captum_model(model, mask_type, idx)
-        inputs, fwd_args = to_captum_input(
-            data.x, data.edge_index, mask_type, data.edge_attr,
-        )
         ig = IntegratedGradients(captum_model)
         attr = ig.attribute(
             inputs=inputs, target=int(data.y[idx]),
@@ -107,16 +107,19 @@ def explain_edges_core(
         ),
     )
 
-    for idx, (node, _) in enumerate(graph.nodes(data=True)):
-        graph.nodes[node]["index_label"] = idx
-    index_to_node = {d["index_label"]: n for n, d in graph.nodes(data=True)}
+    # Build node-index → cell-type lookup array (avoids per-edge dict lookups)
+    nodes = list(graph.nodes())
+    node_celltypes = np.array([graph.nodes[n][celltype_key] for n in nodes])
 
-    cell_type_pairs = []
-    for src, dst in data.edge_index.T:
-        sn = index_to_node[src.item()]
-        dn = index_to_node[dst.item()]
-        pair = tuple(sorted([graph.nodes[sn][celltype_key], graph.nodes[dn][celltype_key]]))
-        cell_type_pairs.append(pair)
+    # Map edge endpoints to cell types in bulk
+    ei = data.edge_index.cpu().numpy()
+    src_ct = node_celltypes[ei[0]]
+    dst_ct = node_celltypes[ei[1]]
+    # Canonical ordering: sort the two cell types per edge
+    cell_type_pairs = [
+        (a, b) if a <= b else (b, a)
+        for a, b in zip(src_ct.tolist(), dst_ct.tolist())
+    ]
 
     test_indices = torch.where(data.test_mask)[0]
     test_labels = data.y[test_indices]

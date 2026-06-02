@@ -60,7 +60,7 @@ def train_model(
 
     for epoch in range(num_epochs):
         model.train()
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
         out = model(data.x, data.edge_index, data.edge_attr)[train_mask]
 
         if continuous:

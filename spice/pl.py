@@ -529,7 +529,7 @@ def compare_runs(
 
     records = []
     for run_name, df in auc_dfs.items():
-        per = df[df["class"].apply(lambda x: isinstance(x, (int, np.integer)))].copy()
+        per = df[~df["class"].isin(["micro", "macro"])].copy()
         per["state"] = per["class"].map(state_map).fillna(per["class"].astype(str))
         per["run"] = run_name
         records.append(per)

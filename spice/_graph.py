@@ -29,41 +29,55 @@ def build_graph_core(
     lb = LabelBinarizer()
     one_hot = lb.fit_transform(adata.obs[celltype_key].values)
 
-    # kNN
-    # NOTE: match the original implementation — NearestNeighbors with
-    # n_neighbors=k returns k results including self, and the loop
-    # range(1, k) yields k-1 actual neighbors per node.
-    nbrs = NearestNeighbors(n_neighbors=n_neighbors, algorithm="ball_tree")
+    # kNN — kd_tree is faster than ball_tree for low-dimensional (2-D) data.
+    nbrs = NearestNeighbors(n_neighbors=n_neighbors, algorithm="kd_tree")
     nbrs.fit(coords)
     distances, indices = nbrs.kneighbors(coords)
 
     G = nx.Graph()
     epsilon = 1e-6
 
+    # Pre-extract arrays once to avoid repeated per-cell indexing
+    cell_ids = np.asarray(adata.obs_names)
+    ct_values = adata.obs[celltype_key].values
+    has_labels = label_key in adata.obs
+    label_values = adata.obs[label_key].values.astype(int) if has_labels else None
+    has_score = bool(score_key and score_key in adata.obs.columns)
+    score_values = adata.obs[score_key].values.astype(float) if has_score else None
+    has_sample = bool(sample_key and sample_key in adata.obs.columns)
+    sample_values = adata.obs[sample_key].values if has_sample else None
+    extra_values = {
+        key: adata.obs[key].values for key in extra_obs_keys
+        if key in adata.obs.columns
+    }
+
+    # Bulk-add nodes
+    node_data = []
     for i in range(adata.n_obs):
         attrs = {
-            "cell_id": adata.obs_names[i],
+            "cell_id": cell_ids[i],
             "array_row": float(coords[i, 0]),
             "array_col": float(coords[i, 1]),
-            celltype_key: adata.obs[celltype_key].values[i],
+            celltype_key: ct_values[i],
             "one_hot_Cell_Type": one_hot[i],
-            "labels": int(adata.obs[label_key].values[i]) if label_key in adata.obs else -1,
+            "labels": int(label_values[i]) if has_labels else -1,
         }
-        if score_key and score_key in adata.obs.columns:
-            val = adata.obs[score_key].values[i]
+        if has_score:
+            val = score_values[i]
             attrs[score_key] = float(val) if not np.isnan(val) else np.nan
-        if sample_key and sample_key in adata.obs.columns:
-            attrs["sample"] = adata.obs[sample_key].values[i]
-        for key in extra_obs_keys:
-            if key in adata.obs.columns:
-                attrs[key] = adata.obs[key].values[i]
-        G.add_node(i, **attrs)
+        if has_sample:
+            attrs["sample"] = sample_values[i]
+        for key, vals in extra_values.items():
+            attrs[key] = vals[i]
+        node_data.append((i, attrs))
+    G.add_nodes_from(node_data)
 
-    for i in range(adata.n_obs):
-        for j in range(1, n_neighbors):  # skip self (index 0)
-            neighbor_idx = indices[i, j]
-            dist = distances[i, j]
-            G.add_edge(i, neighbor_idx, weight=1.0 / (dist + epsilon))
+    # Bulk-add edges — build source/target/weight arrays, then add in one call
+    src = np.repeat(np.arange(adata.n_obs), n_neighbors - 1)
+    dst = indices[:, 1:].ravel()
+    weights = 1.0 / (distances[:, 1:].ravel() + epsilon)
+    G.add_edges_from(zip(src.tolist(), dst.tolist(),
+                         ({"weight": w} for w in weights.tolist())))
 
     return G, lb
 
