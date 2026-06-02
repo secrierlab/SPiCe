@@ -642,6 +642,13 @@ def sanitize(
         if parts:
             s["edge_explanations"] = pd.concat(parts, ignore_index=True)
 
+    # Ensure the "class" column in auc DataFrame is string-typed so
+    # h5py can serialise it (older runs stored integers mixed with
+    # "micro"/"macro" strings, giving an object column).
+    auc_df = s.get("auc")
+    if isinstance(auc_df, pd.DataFrame) and "class" in auc_df.columns:
+        auc_df["class"] = auc_df["class"].astype(str)
+
     # Flatten baseline tuple → keep only the summary DataFrame
     baseline = s.get("baseline")
     if isinstance(baseline, tuple):

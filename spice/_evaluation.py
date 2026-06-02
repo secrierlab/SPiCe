@@ -45,7 +45,7 @@ def _eval_multiclass(probs, all_true, n_classes):
         t_bin = label_binarize(t, classes=list(range(n_classes)))
         for c in range(n_classes):
             fpr, tpr, _ = roc_curve(t_bin[:, c], p[:, c])
-            records.append({"fold": fold + 1, "class": c, "AUC": auc(fpr, tpr)})
+            records.append({"fold": fold + 1, "class": str(c), "AUC": auc(fpr, tpr)})
         fpr_mi, tpr_mi, _ = roc_curve(t_bin.ravel(), p.ravel())
         records.append({"fold": fold + 1, "class": "micro", "AUC": auc(fpr_mi, tpr_mi)})
         all_fpr = np.unique(np.concatenate(
