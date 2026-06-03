@@ -30,14 +30,20 @@ from matplotlib.lines import Line2D
 # ──────────────────────────────────────────────────────────────────────
 
 CB_PALETTE = [
-    "#0072B2", "#D55E00", "#56B4E9", "#009E73",
-    "#F0E442", "#E69F00", "#CC79A7", "#999999",
+    "#0072B2",
+    "#D55E00",
+    "#56B4E9",
+    "#009E73",
+    "#F0E442",
+    "#E69F00",
+    "#CC79A7",
+    "#999999",
 ]
 
 _DEFAULT_STYLE = {
     "pdf.fonttype": 42,
     "ps.fonttype": 42,
-    "font.family": "DejaVu Sans",
+    "font.family": "Arial, Helvetica, sans-serif",
     "font.weight": "normal",
     "font.size": 12,
     "axes.spines.top": False,
@@ -70,6 +76,7 @@ def _despine(ax):
 # ──────────────────────────────────────────────────────────────────────
 # 1.  Node importance scatter
 # ──────────────────────────────────────────────────────────────────────
+
 
 def node_importance(
     adata,
@@ -132,8 +139,7 @@ def node_importance(
                 sizes.append(30)
 
         neg_log_p = -np.log10(p_arr + 1e-300)  # avoid log(0)
-        ax.scatter(x, neg_log_p, c=colors, s=sizes, edgecolors="white",
-                   linewidths=0.4, zorder=3)
+        ax.scatter(x, neg_log_p, c=colors, s=sizes, edgecolors="white", linewidths=0.4, zorder=3)
         ax.set_xticks(x)
         ax.set_xticklabels(pvals.columns, rotation=90, fontsize=7)
         name = state_map.get(label, str(label))
@@ -154,6 +160,7 @@ def node_importance(
 # ──────────────────────────────────────────────────────────────────────
 # 2.  Edge interaction network
 # ──────────────────────────────────────────────────────────────────────
+
 
 def edge_network(
     adata,
@@ -204,7 +211,8 @@ def edge_network(
         if isinstance(df["cell_type_pair"].iloc[0], str):
             df["cell_type_pair"] = df["cell_type_pair"].apply(ast.literal_eval)
         df[["ct1", "ct2"]] = pd.DataFrame(
-            df["cell_type_pair"].tolist(), index=df.index,
+            df["cell_type_pair"].tolist(),
+            index=df.index,
         )
         df_sig = df[df["p_value"] < alpha]
 
@@ -212,9 +220,16 @@ def edge_network(
         fig, ax = plt.subplots(figsize=figsize)
 
         if df_sig.empty:
-            ax.text(0.5, 0.5, f"No significant edges (p < {alpha})",
-                    transform=ax.transAxes, ha="center", va="center",
-                    fontsize=12, color="#666666")
+            ax.text(
+                0.5,
+                0.5,
+                f"No significant edges (p < {alpha})",
+                transform=ax.transAxes,
+                ha="center",
+                va="center",
+                fontsize=12,
+                color="#666666",
+            )
             ax.set_title(name, fontsize=14, fontweight="bold")
             ax.axis("off")
             outputs.append((fig, ax))
@@ -222,8 +237,7 @@ def edge_network(
 
         G_net = nx.Graph()
         for _, row in df_sig.iterrows():
-            G_net.add_edge(row["ct1"], row["ct2"],
-                           weight=row["mean_importance_target"])
+            G_net.add_edge(row["ct1"], row["ct2"], weight=row["mean_importance_target"])
 
         # Use shell layout for cleaner spacing with few nodes,
         # fall back to kamada_kawai for larger graphs
@@ -237,9 +251,9 @@ def edge_network(
         if weights.max() == weights.min():
             widths = np.full_like(weights, (min_width + max_width) / 2)
         else:
-            widths = min_width + (weights - weights.min()) / (
-                weights.max() - weights.min()
-            ) * (max_width - min_width)
+            widths = min_width + (weights - weights.min()) / (weights.max() - weights.min()) * (
+                max_width - min_width
+            )
 
         # Colour edges by importance
         edge_cmap = plt.get_cmap("YlOrRd")
@@ -249,13 +263,17 @@ def edge_network(
             norm = mcolors.Normalize(vmin=weights.min(), vmax=weights.max())
             edge_colors = [edge_cmap(norm(w)) for w in weights]
 
-        nx.draw_networkx_edges(G_net, pos, ax=ax, width=widths,
-                               edge_color=edge_colors, alpha=0.7)
-        nx.draw_networkx_nodes(G_net, pos, ax=ax, node_size=1200,
-                               node_color="white", linewidths=2,
-                               edgecolors=CB_PALETTE[0])
-        nx.draw_networkx_labels(G_net, pos, ax=ax, font_size=9,
-                                font_weight="bold")
+        nx.draw_networkx_edges(G_net, pos, ax=ax, width=widths, edge_color=edge_colors, alpha=0.7)
+        nx.draw_networkx_nodes(
+            G_net,
+            pos,
+            ax=ax,
+            node_size=1200,
+            node_color="white",
+            linewidths=2,
+            edgecolors=CB_PALETTE[0],
+        )
+        nx.draw_networkx_labels(G_net, pos, ax=ax, font_size=9, font_weight="bold")
 
         # Continuous colorbar legend
         sm = cm.ScalarMappable(
@@ -286,6 +304,7 @@ def edge_network(
 # ──────────────────────────────────────────────────────────────────────
 # 3.  AUC per class
 # ──────────────────────────────────────────────────────────────────────
+
 
 def auc_per_class(
     adata,
@@ -323,22 +342,33 @@ def auc_per_class(
     import seaborn as sns
 
     fig, ax = plt.subplots(figsize=figsize)
-    order = sorted(per_class["state"].unique(),
-                   key=lambda s: list(state_map.values()).index(s)
-                   if s in state_map.values() else 999)
-    sns.stripplot(data=per_class, x="state", y="AUC", jitter=True,
-                  palette=CB_PALETTE[: len(order)], size=8, ax=ax,
-                  order=order, edgecolor="white", linewidth=0.5,
-                  alpha=0.8, zorder=3)
+    order = sorted(
+        per_class["state"].unique(),
+        key=lambda s: list(state_map.values()).index(s) if s in state_map.values() else 999,
+    )
+    sns.stripplot(
+        data=per_class,
+        x="state",
+        y="AUC",
+        jitter=True,
+        palette=CB_PALETTE[: len(order)],
+        size=8,
+        ax=ax,
+        order=order,
+        edgecolor="white",
+        linewidth=0.5,
+        alpha=0.8,
+        zorder=3,
+    )
 
     means = per_class.groupby("state")["AUC"].mean()
     for i, state in enumerate(order):
         if state in means.index:
-            ax.hlines(means[state], i - 0.3, i + 0.3, colors="k",
-                      linewidth=2, zorder=4)
+            ax.hlines(means[state], i - 0.3, i + 0.3, colors="k", linewidth=2, zorder=4)
 
     ax.set_ylabel("AUC")
     ax.set_xlabel("")
+    ax.set_box_aspect(1)
     _despine(ax)
     fig.tight_layout()
     if save:
@@ -349,6 +379,7 @@ def auc_per_class(
 # ──────────────────────────────────────────────────────────────────────
 # 4.  Regression R²
 # ──────────────────────────────────────────────────────────────────────
+
 
 def regression_r2(
     adata,
@@ -374,11 +405,20 @@ def regression_r2(
     df = _require(adata, "regression", "evaluate")
 
     fig, ax = plt.subplots(figsize=figsize)
-    ax.plot(df["fold"], df["R2"], "o", color=CB_PALETTE[0], markersize=8,
-            markeredgecolor="white", markeredgewidth=0.5, zorder=3)
+    ax.plot(
+        df["fold"],
+        df["R2"],
+        "o",
+        color=CB_PALETTE[0],
+        markersize=8,
+        markeredgecolor="white",
+        markeredgewidth=0.5,
+        zorder=3,
+    )
     ax.axhline(df["R2"].mean(), ls="--", color="k", lw=0.8, alpha=0.6)
     ax.set_xlabel("Fold")
     ax.set_ylabel(r"$R^2$")
+    ax.set_box_aspect(1)
     _despine(ax)
     fig.tight_layout()
     if save:
@@ -389,6 +429,7 @@ def regression_r2(
 # ──────────────────────────────────────────────────────────────────────
 # 5.  Baseline comparison
 # ──────────────────────────────────────────────────────────────────────
+
 
 def baseline(
     adata,
@@ -415,17 +456,28 @@ def baseline(
     summary = summary.sort_values("mean_AUC", ascending=True)
 
     colors = [
-        CB_PALETTE[0] if ("Neighbour" in m or "Neighbor" in m or "GNN" in m)
-        else CB_PALETTE[7]
+        CB_PALETTE[0] if ("Neighbour" in m or "Neighbor" in m or "GNN" in m) else CB_PALETTE[7]
         for m in summary["model"]
     ]
 
     fig, ax = plt.subplots(figsize=figsize)
-    bars = ax.barh(summary["model"], summary["mean_AUC"], xerr=summary["std"],
-                   color=colors, edgecolor="white", capsize=4, linewidth=0.8)
+    bars = ax.barh(
+        summary["model"],
+        summary["mean_AUC"],
+        xerr=summary["std"],
+        color=colors,
+        edgecolor="white",
+        capsize=4,
+        linewidth=0.8,
+    )
     for i, (_, row) in enumerate(summary.iterrows()):
-        ax.text(row["mean_AUC"] + row["std"] + 0.005, i,
-                f'{row["mean_AUC"]:.3f}', va="center", fontsize=9)
+        ax.text(
+            row["mean_AUC"] + row["std"] + 0.005,
+            i,
+            f"{row['mean_AUC']:.3f}",
+            va="center",
+            fontsize=9,
+        )
     ax.set_xlabel("ROC AUC")
     ax.set_xlim(0.5, 1.0)
     ax.spines["top"].set_visible(False)
@@ -439,6 +491,7 @@ def baseline(
 # ──────────────────────────────────────────────────────────────────────
 # 6.  MERFISH-style AUC dot plot
 # ──────────────────────────────────────────────────────────────────────
+
 
 def auc_dotplot(
     df_auc: pd.DataFrame,
@@ -478,13 +531,23 @@ def auc_dotplot(
 
     fig, ax = plt.subplots(figsize=figsize)
     x = np.arange(len(grouped))
-    ax.errorbar(x, grouped["mean"], yerr=grouped["std"],
-                fmt="o", color=CB_PALETTE[0], markersize=7,
-                markeredgecolor="white", markeredgewidth=0.5,
-                elinewidth=1, capsize=3, zorder=3)
+    ax.errorbar(
+        x,
+        grouped["mean"],
+        yerr=grouped["std"],
+        fmt="o",
+        color=CB_PALETTE[0],
+        markersize=7,
+        markeredgecolor="white",
+        markeredgewidth=0.5,
+        elinewidth=1,
+        capsize=3,
+        zorder=3,
+    )
     ax.set_xticks(x)
     ax.set_xticklabels(grouped.index, rotation=90, fontsize=8)
     ax.set_ylabel("AUC")
+    ax.set_box_aspect(1)
     _despine(ax)
     fig.tight_layout()
     if save:
@@ -495,6 +558,7 @@ def auc_dotplot(
 # ──────────────────────────────────────────────────────────────────────
 # 7.  Multi-run comparison (feature modes, split strategies)
 # ──────────────────────────────────────────────────────────────────────
+
 
 def compare_runs(
     auc_dfs: dict[str, pd.DataFrame],
@@ -537,9 +601,10 @@ def compare_runs(
     combined = pd.concat(records, ignore_index=True)
     grouped = combined.groupby(["state", "run"])["AUC"].agg(["mean", "std"]).reset_index()
 
-    states = sorted(grouped["state"].unique(),
-                    key=lambda s: list(state_map.values()).index(s)
-                    if s in state_map.values() else 999)
+    states = sorted(
+        grouped["state"].unique(),
+        key=lambda s: list(state_map.values()).index(s) if s in state_map.values() else 999,
+    )
     runs = list(auc_dfs.keys())
     x_pos = np.arange(len(runs))
     offset = 0.18
@@ -551,17 +616,23 @@ def compare_runs(
         sub = sub.reindex(runs).reset_index()
         ax.errorbar(
             x_pos + (i - len(states) / 2) * offset,
-            sub["mean"], yerr=sub["std"],
-            fmt="o", label=state, color=CB_PALETTE[i % len(CB_PALETTE)],
-            elinewidth=1.5, capsize=3, markersize=7,
-            markeredgecolor="white", markeredgewidth=0.5, zorder=3,
+            sub["mean"],
+            yerr=sub["std"],
+            fmt="o",
+            label=state,
+            color=CB_PALETTE[i % len(CB_PALETTE)],
+            elinewidth=1.5,
+            capsize=3,
+            markersize=7,
+            markeredgecolor="white",
+            markeredgewidth=0.5,
+            zorder=3,
         )
 
     ax.set_xticks(x_pos)
     ax.set_xticklabels(runs, rotation=25, ha="right")
     ax.set_ylabel("AUC")
-    ax.legend(title="State", bbox_to_anchor=(1.02, 1), loc="upper left",
-              frameon=False)
+    ax.legend(title="State", bbox_to_anchor=(1.02, 1), loc="upper left", frameon=False)
     _despine(ax)
     fig.tight_layout()
     if save:
