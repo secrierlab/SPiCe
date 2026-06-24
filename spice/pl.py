@@ -110,6 +110,8 @@ def node_importance(
     """
     _apply_style()
     pvals = _require(adata, "node_pvalues", "explain_nodes")
+    qvals = _require(adata, "node_qvalues", "explain_nodes")  
+
     state_map = state_map or {}
     red_cmap = plt.get_cmap("Reds")
 
@@ -156,6 +158,103 @@ def node_importance(
         fig.savefig(save, bbox_inches="tight", dpi=300)
     return fig, axes
 
+
+def node_importance_signed(
+    adata,
+    state_map: dict[int, str] | None = None,
+    alpha: float = 0.05,
+    save: str | None = None,
+    figsize: tuple[float, float] | None = None,
+    pos_color: str = "#c0392b",
+    neg_color: str = "#2c6fbb",
+) -> tuple[plt.Figure, np.ndarray]:
+    """Signed scatter plot of node-level feature importance p-values.
+
+    For each node label, features are plotted at ``-log10(p)``. Significant
+    features (p < *alpha*) are coloured by the direction of their mean
+    effect (red positive, blue negative); non-significant features are grey.
+
+    Parameters
+    ----------
+    adata
+        Annotated data matrix (requires ``spice.tl.explain_nodes``).
+    state_map
+        Dict mapping integer labels to readable names (e.g.
+        ``{0: "EPI", 1: "MES"}``).
+    alpha
+        Significance threshold.
+    save
+        File path to save the figure.
+    figsize
+        Override figure size per panel.
+    pos_color
+        Colour for significant positive effects.
+    neg_color
+        Colour for significant negative effects.
+
+    Returns
+    -------
+    ``(fig, axes)``
+    """
+    _apply_style()
+    pvals = _require(adata, "node_pvalues", "explain_nodes")
+    imp = _require(adata, "node_importance", "explain_nodes")
+    means = imp.pivot(index="label", columns="feature", values="mean")
+    means = means.reindex(index=pvals.index, columns=pvals.columns)
+    state_map = state_map or {}
+
+    n_states = len(pvals)
+    n_cols = min(n_states, 2)
+    n_rows = int(np.ceil(n_states / n_cols))
+    if figsize is None:
+        figsize = (6.5 * n_cols, 4 * n_rows)
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize)
+    axes = np.atleast_1d(axes).flatten()
+
+    for idx, label in enumerate(pvals.index):
+        ax = axes[idx]
+        p_arr = pvals.loc[label].values.astype(float)
+        m_arr = means.loc[label].values.astype(float)
+        x = np.arange(len(p_arr))
+
+        sig = p_arr < alpha
+        colors = np.where(~sig, "#bdbdbd",
+                          np.where(m_arr > 0, pos_color, neg_color))
+        neg_log_p = -np.log10(p_arr + 1e-300)  # avoid log(0)
+
+        ax.scatter(
+            x, neg_log_p,
+            c=colors,
+            s=np.where(sig, 60, 30),
+            edgecolors=np.where(sig, "black", "white"),
+            linewidths=np.where(sig, 0.8, 0.4),
+            zorder=3,
+        )
+        ax.set_xticks(x)
+        ax.set_xticklabels(pvals.columns, rotation=90, fontsize=7)
+        name = state_map.get(label, str(label))
+        ax.set_title(name, fontsize=12, fontweight="bold")
+        ax.set_ylabel(r"$-\log_{10}(p)$")
+        ax.axhline(-np.log10(alpha), ls="--", lw=0.8, color="#999999", alpha=0.6)
+        _despine(ax)
+
+    for j in range(idx + 1, len(axes)):
+        axes[j].set_visible(False)
+
+    handles = [
+        plt.Line2D([0], [0], marker="o", ls="", mfc=pos_color, mec="black",
+                   ms=8, label="Positive effect"),
+        plt.Line2D([0], [0], marker="o", ls="", mfc=neg_color, mec="black",
+                   ms=8, label="Negative effect"),
+        plt.Line2D([0], [0], marker="o", ls="", mfc="#bdbdbd", mec="white",
+                   ms=8, label="n.s."),
+    ]
+    fig.legend(handles=handles, loc="upper right", frameon=False, fontsize=9)
+    fig.tight_layout()
+    if save:
+        fig.savefig(save, bbox_inches="tight", dpi=300)
+    return fig, axes
 
 # ──────────────────────────────────────────────────────────────────────
 # 2.  Edge interaction network

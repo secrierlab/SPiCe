@@ -1,89 +1,71 @@
 """Internal explanation routines (Integrated Gradients, GNNExplainer)."""
 
-from __future__ import annotations
-
 import numpy as np
 import pandas as pd
 import torch
 from scipy.stats import mannwhitneyu, ttest_ind
 from tqdm import tqdm
+from sklearn.inspection import permutation_importance
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import roc_auc_score
+from sklearn.neighbors import NearestNeighbors
+from sklearn.neural_network import MLPClassifier
+import shap
+
 
 
 def explain_nodes_core(
-    model,
-    data,
-    test_labels_index: pd.DataFrame,
-    n_explanations: int,
-    mask_type: str,
-    feature_names: list[str] | None,
-) -> tuple[dict[int, pd.DataFrame], pd.DataFrame]:
+    model, data, test_labels_index, n_explanations, mask_type,
+    feature_names=None, seed=None, ig_steps=50,
+):
+    """IG node attributions per label + a label-shuffled null.
+ 
+    Returns
+    -------
+    attributions : dict{label: DataFrame}   rows = explained nodes, cols = features
+    perm_df      : DataFrame                 null attributions (shuffled targets)
+    """
     from captum.attr import IntegratedGradients
     from torch_geometric.nn import to_captum_input, to_captum_model
-
+ 
+    rng = np.random.default_rng(seed)
     unique_labels = test_labels_index["Label"].unique()
+    inputs, fwd_args = to_captum_input(data.x, data.edge_index, mask_type, data.edge_attr)
+    y = data.y.cpu().numpy()
+ 
+    def attribute(idx, target):
+        idx, target = int(idx), int(target)
+        ig = IntegratedGradients(to_captum_model(model, mask_type, idx))
+        attr = ig.attribute(inputs=inputs, target=target, n_steps=ig_steps,
+                            additional_forward_args=fwd_args, internal_batch_size=1)
+        return pd.DataFrame(attr[0].squeeze().detach().cpu().numpy()).sum(axis=0).values
+ 
+    def sample(idx_pool):
+        return rng.choice(idx_pool, min(n_explanations, len(idx_pool)), replace=False).astype(int)
+ 
+    # per-label attributions — filter to correctly-classified FIRST, then sample
     attributions = {}
-
-    # Pre-compute shared captum inputs (edge_index etc. are the same for
-    # every target node — only the index argument changes).
-    inputs, fwd_args = to_captum_input(
-        data.x, data.edge_index, mask_type, data.edge_attr,
-    )
-
     for label in unique_labels:
         print(f"Computing node explanations for label {label}...")
-        indices = test_labels_index.loc[
-            test_labels_index["Label"] == label, "Indices"
-        ].values
-        sampled = np.random.choice(indices, min(n_explanations, len(indices)), replace=False)
-
-        rows = []
-        for idx in tqdm(sampled, desc=f"Label {label}"):
-            idx = int(idx)
-            if int(data.y[idx]) != label:
-                continue
-            captum_model = to_captum_model(model, mask_type, idx)
-            ig = IntegratedGradients(captum_model)
-            attr = ig.attribute(
-                inputs=inputs, target=int(data.y[idx]),
-                additional_forward_args=fwd_args, internal_batch_size=1,
-            )
-            attr_np = attr[0].squeeze().detach().cpu().numpy()
-            rows.append(pd.DataFrame(attr_np).mean(axis=0).values)
+        pool = test_labels_index.loc[test_labels_index["Label"] == label, "Indices"].values.astype(int)
+        pool = pool[y[pool] == label]
+        rows = [attribute(i, label) for i in tqdm(sample(pool), desc=f"Label {label}")]
         attributions[label] = pd.DataFrame(rows)
-
-    # permutation baseline
-    print("Computing permutation baseline...")
-    all_idx = test_labels_index["Indices"].values
-    perm_sampled = np.random.choice(all_idx, min(n_explanations, len(all_idx)), replace=False)
-    perm_rows = []
-    for idx in tqdm(perm_sampled, desc="Permutation"):
-        idx = int(idx)
-        captum_model = to_captum_model(model, mask_type, idx)
-        ig = IntegratedGradients(captum_model)
-        attr = ig.attribute(
-            inputs=inputs, target=int(data.y[idx]),
-            additional_forward_args=fwd_args, internal_batch_size=1,
-        )
-        attr_np = attr[0].squeeze().detach().cpu().numpy()
-        perm_rows.append(pd.DataFrame(attr_np).mean(axis=0).values)
-    perm_df = pd.DataFrame(perm_rows)
-
+ 
+    # label-shuffled null: explain each sampled node at a permuted target
+    print("Computing label-shuffled null...")
+    idx = sample(test_labels_index["Indices"].values.astype(int))
+    targets = rng.permutation(y[idx])
+    perm_df = pd.DataFrame([attribute(i, t) for i, t in
+                            tqdm(zip(idx, targets), total=len(idx), desc="Null")])
+ 
     if feature_names is not None:
-        col_map = {i: name for i, name in enumerate(feature_names)}
+        col_map = dict(enumerate(feature_names))
         perm_df = perm_df.rename(columns=col_map)
-        for label in attributions:
-            attributions[label] = attributions[label].rename(columns=col_map)
+        attributions = {k: v.rename(columns=col_map) for k, v in attributions.items()}
+ 
+    return attributions, perm_df
 
-    ref_cols = attributions[unique_labels[0]].columns
-    p_values = pd.DataFrame(index=unique_labels, columns=ref_cols, dtype=float)
-    for label in unique_labels:
-        for feat in ref_cols:
-            _, p = mannwhitneyu(
-                attributions[label][feat], perm_df[feat], alternative="greater",
-            )
-            p_values.loc[label, feat] = p
-
-    return attributions, p_values
 
 
 def explain_edges_core(
@@ -171,3 +153,79 @@ def explain_edges_core(
         results[label_val] = pd.DataFrame(records)
 
     return results
+
+def _feature_names(n_base, augmented, base_names=None):
+    base = list(base_names) if base_names is not None else [f"feat_{i}" for i in range(n_base)]
+    return base + [f"{b}_nbr" for b in base] if augmented else base
+
+def _extract(fold_data, graph):
+    tm = fold_data.train_mask.cpu().numpy()
+    te = fold_data.test_mask.cpu().numpy()
+    X = fold_data.x.cpu().numpy()
+    y = fold_data.y.cpu().numpy()
+    nodes = list(graph.nodes())
+    node_data = graph.nodes
+    coords = np.array([[node_data[n]["array_row"], node_data[n]["array_col"]]
+                        for n in nodes])
+    return X, y, coords, tm, te
+
+
+def _augment(X, coords, k):
+    nbrs = NearestNeighbors(n_neighbors=k + 1, algorithm="kd_tree").fit(coords)
+    _, idx = nbrs.kneighbors(coords)
+    # Vectorised neighbour feature sum (replaces per-cell Python loop)
+    nmean = X[idx[:, 1:]].sum(axis=1)
+    return np.hstack([X, nmean])
+
+import shap
+
+def explain_baselines_core(
+    fold_datasets: list,
+    graph,
+    k: int,
+    feature_names: list[str] | None = None,
+    top_n: int = 10,
+    verbose: bool = True,
+) -> pd.DataFrame:
+    """Per-label SHAP feature importance for the RF + Neighbours baseline,
+    averaged across folds. Values are signed mean SHAP contributions toward
+    each label (features × labels): positive pushes cells toward that label,
+    negative away.
+    """
+    importances = []
+
+    for fold_data in fold_datasets:
+        X, y, coords, train_mask, test_mask = _extract(fold_data, graph)
+        X_aug = _augment(X, coords, k)
+        names = _feature_names(X.shape[1], True, feature_names)
+
+        Xtr, Xte = X_aug[train_mask], X_aug[test_mask]
+        ytr, yte = y[train_mask], y[test_mask]
+
+        clf = RandomForestClassifier(1, random_state=42, n_jobs=-1).fit(Xtr, ytr)
+
+        sv = shap.TreeExplainer(clf).shap_values(Xte)
+        if isinstance(sv, list):                 
+            sv = np.stack(sv, axis=-1)           
+
+        per_label = {}
+        for ci, cls in enumerate(clf.classes_):  # class axis follows clf.classes_
+            sub = yte == cls
+            if sub.sum() < 2:
+                per_label[cls] = pd.Series(np.nan, index=names)
+                continue
+            per_label[cls] = pd.Series(sv[sub, :, ci].mean(0), index=names)
+
+        importances.append(pd.DataFrame(per_label))
+
+    imp_summary = pd.concat(importances).groupby(level=0).mean()  # features × labels
+
+    if verbose:
+        print("\n  Top features — RF + Neighbours (signed mean SHAP)")
+        for cls in imp_summary.columns:
+            order = imp_summary[cls].abs().sort_values(ascending=False).index
+            top = imp_summary[cls].reindex(order).head(top_n)
+            print(f"\n    Label {cls}")
+            print(top.to_string())
+
+    return imp_summary

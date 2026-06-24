@@ -413,61 +413,113 @@ def evaluate(
 def explain_nodes(
     adata: AnnData,
     n_explanations: int = 50,
-    fold_index: int = 0,
+    fold_index: int | None = None,
     mask_type: str = "node",
+    seed: int | None = None,
+    ig_steps: int = 50,
+    top_n: int = 15,
+    verbose: bool = True,
     copy: bool = False,
 ) -> AnnData | None:
-    """Compute node-level feature importance via Integrated Gradients.
-
-    Stored keys
-    -----------
-    ``adata.uns['spice']['node_attributions']``
-        Dict mapping each label to a DataFrame of IG scores.
-    ``adata.uns['spice']['node_pvalues']``
-        DataFrame of Mann-Whitney U p-values (label × feature).
-
-    Parameters
-    ----------
-    adata
-        Annotated data matrix.
-    n_explanations
-        Number of test nodes to explain per label.
-    fold_index
-        Which fold's model and data to use (0-based).
-    mask_type
-        Captum mask type (``"node"`` or ``"edge"``).
-    copy
-        Operate on a copy.
+    """Node feature importance via Integrated Gradients, pooled across folds.
+ 
+    Each fold's attributions are standardized against that fold's own
+    label-shuffled null, then the standardized nodes from every fold are pooled.
+    Per (label, feature):
+ 
+    - ``mean``              standardized mean (null-SD units); its sign says whether
+                            the feature reads higher or lower than baseline. Plot this.
+    - ``sign_consistency``  fraction of folds agreeing with that sign (scale-free).
+    - ``p_value``           two-sided Mann-Whitney, pooled label nodes vs pooled null.
+    - ``q_value``           Benjamini-Hochberg FDR across the grid.
+ 
+    Stored in ``adata.uns['spice']``: ``node_importance`` (tidy table),
+    ``node_pvalues`` / ``node_qvalues`` (matrices), ``node_attributions`` (raw IG).
     """
     adata = adata.copy() if copy else adata
     s = _spice(adata)
     cv = _require(adata, "cv_results", "cross_validate")
     folds = _require(adata, "folds", "cross_validate")
-    lb = _require(adata, "label_binarizer", "build_graph")
-
-    data = folds[fold_index]
-    model = cv["models"][fold_index]
-    preds = cv["all_predicted"][fold_index]
-
-    mask = data.test_mask
-    indices = torch.where(mask)[0].tolist()
-    pred_tensor = torch.tensor(preds)
-    if pred_tensor.ndim > 1:
-        _, pred_labels = torch.max(pred_tensor, dim=1)
-    else:
-        pred_labels = (pred_tensor > 0.5).long()
-
-    test_df = pd.DataFrame({"Indices": indices, "Label": pred_labels.numpy()})
-
+    fold_ids = range(len(folds)) if fold_index is None else [fold_index]
+ 
     from spice._explanations import explain_nodes_core
-
-    attributions, p_values = explain_nodes_core(
-        model, data, test_df, n_explanations, mask_type,
-        feature_names=list(lb.classes_),
-    )
-
-    s["node_attributions"] = attributions
-    s["node_pvalues"] = p_values
+    from scipy.stats import mannwhitneyu
+    from statsmodels.stats.multitest import multipletests
+ 
+    feature_names = _baseline_feature_names(s, folds)
+ 
+    def mwu(label_vals, null_vals):
+        a, b = label_vals.dropna().values, null_vals.dropna().values
+        try:
+            return mannwhitneyu(a, b, alternative="two-sided").pvalue
+        except ValueError:          # constant feature 
+            return np.nan
+ 
+    # 1. Run each fold; standardize its nodes against its own null.
+    label_z, null_z, raw = {}, [], {}
+    for fi in fold_ids:
+        data, model = folds[fi], cv["models"][fi]
+        preds = torch.tensor(cv["all_predicted"][fi])
+        pred_labels = preds.argmax(1) if preds.ndim > 1 else (preds > 0.5).long()
+        test_df = pd.DataFrame({
+            "Indices": torch.where(data.test_mask)[0].tolist(),
+            "Label": pred_labels.numpy(),
+        })
+ 
+        attributions, null = explain_nodes_core(
+            model, data, test_df, n_explanations, mask_type,
+            feature_names=feature_names, seed=seed, ig_steps=ig_steps,
+        )
+        mu, sd = null.mean(0), null.std(0).replace(0, np.nan)   # guard for constant features
+        null_z.append((null - mu) / sd)
+        for lab, df in attributions.items():
+            raw.setdefault(lab, []).append(df)
+            if not df.empty:
+                label_z.setdefault(lab, []).append((df - mu) / sd)
+ 
+    null_all = pd.concat(null_z, ignore_index=True)
+ 
+    # 2. Aggregate per (label, feature) over the pooled standardized nodes.
+    rows = []
+    for lab, z_list in label_z.items():
+        Z = pd.concat(z_list, ignore_index=True)                  # pooled label nodes
+        per_fold = pd.concat([z.mean(0) for z in z_list], axis=1)  # features × folds
+        mean = Z.mean(0)
+ 
+        valid = per_fold.notna()
+        agree = np.sign(per_fold).eq(np.sign(mean), axis=0) & valid
+        rows.append(pd.DataFrame({
+            "label": lab,
+            "feature": Z.columns,
+            "mean": mean.values,
+            "sign_consistency": (agree.sum(1) / valid.sum(1)).values,
+            "p_value": [mwu(Z[f], null_all[f]) for f in Z.columns],
+        }))
+ 
+    imp = pd.concat(rows, ignore_index=True)
+ 
+    # 3. FDR across the grid, then sort by |mean| within each label.
+    p = imp["p_value"].values
+    q = np.full(len(p), np.nan)
+    ok = ~np.isnan(p)
+    if ok.any():
+        q[ok] = multipletests(p[ok], method="fdr_bh")[1]
+    imp["q_value"] = q
+    imp = (imp.assign(a=imp["mean"].abs())
+              .sort_values(["label", "a"], ascending=[True, False])
+              .drop(columns="a").reset_index(drop=True))
+ 
+    if verbose:
+        cols = ["feature", "mean", "sign_consistency", "p_value", "q_value"]
+        print("\nTop node features per label (standardized mean across folds):")
+        for lab in imp["label"].unique():
+            print(f"\n  Label {lab}")
+            print(imp[imp["label"] == lab][cols].head(top_n).to_string(index=False))
+ 
+    s["node_importance"] = imp
+    s["node_pvalues"] = imp.pivot(index="label", columns="feature", values="p_value")
+    s["node_qvalues"] = imp.pivot(index="label", columns="feature", values="q_value")
+    s["node_attributions"] = {lab: pd.concat(dfs, ignore_index=True) for lab, dfs in raw.items()}
     return adata if copy else None
 
 
@@ -547,6 +599,98 @@ def run_baseline(
     return adata if copy else None
 
 
+def _baseline_feature_names(s: dict, folds: list) -> list[str]:
+    """Column labels for the baseline feature matrix (= X_spice), per feature_mode."""
+    mode = s.get("feature_mode", "celltype")
+    lb = s.get("label_binarizer")
+    celltype = list(lb.classes_) if lb is not None else []
+    n_feat = folds[0].x.shape[1]
+
+    if mode == "celltype":
+        names = celltype
+    elif mode == "intrinsic":
+        names = [f"PC{i+1}" for i in range(n_feat)]
+    elif mode == "combined":
+        names = celltype + [f"PC{i+1}" for i in range(n_feat - len(celltype))]
+    else:
+        names = [f"feat_{i}" for i in range(n_feat)]
+
+    if len(names) != n_feat:
+        raise ValueError(
+            f"Derived {len(names)} feature names but X has {n_feat} columns "
+            f"(feature_mode={mode!r}). Pass feature_names explicitly."
+        )
+    return names
+
+
+def explain_baselines(
+    adata: AnnData,
+    k: int | None = None,
+    n_repeats: int = 10,
+    feature_names: list[str] | None = None,
+    top_n: int = 10,
+    verbose: bool = True,
+    copy: bool = False,
+) -> AnnData | None:
+    """Per-label permutation feature importance for the RF + Neighbours baseline,
+    averaged across folds.
+
+    For each state label, the test set is restricted to cells of that label and
+    permutation importance is computed on that subset.
+
+    Stored keys
+    -----------
+    ``adata.uns['spice']['baseline_importances']``
+        A ``features × labels`` DataFrame of mean permutation importance scores.
+
+    Parameters
+    ----------
+    adata
+        Annotated data matrix.
+    k
+        Number of spatial neighbours for the neighbour augmentation.
+        If ``None``, falls back to ``params['n_neighbors']`` from graph-build time.
+    
+    feature_names
+        Names for the base feature block (the ``_nbr`` columns are derived
+        automatically). If ``None``, derived from ``feature_mode``
+        (cell-type classes and/or PC labels).
+    top_n
+        How many top features to print per label when ``verbose``.
+    verbose
+        Print the top-``top_n`` features per label.
+    copy
+        Operate on a copy.
+    """
+    adata = adata.copy() if copy else adata
+    s = _spice(adata)
+    folds = _require(adata, "folds", "cross_validate")
+    graph = _require(adata, "graph", "build_graph")
+
+    if k is None:
+        k = s.get("params", {}).get("n_neighbors")
+        if k is None:
+            raise ValueError(
+                "No `k` provided and none stored in params; pass k explicitly."
+            )
+
+    if feature_names is None:
+        feature_names = _baseline_feature_names(s, folds)
+
+    from spice._explanations import explain_baselines_core
+
+    importances = explain_baselines_core(
+        fold_datasets=folds,
+        graph=graph,
+        k=k,
+        feature_names=feature_names,
+        top_n=top_n,
+        verbose=verbose,
+    )
+
+    s["baseline_importances"] = importances
+    return adata if copy else None
+    
 # ──────────────────────────────────────────────────────────────────────
 # 8.  Sanitise for saving
 # ──────────────────────────────────────────────────────────────────────
@@ -661,3 +805,4 @@ def sanitize(
         s["baseline"] = baseline[0]  # summary DataFrame
 
     return adata if copy else None
+
