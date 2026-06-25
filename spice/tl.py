@@ -611,7 +611,7 @@ def _baseline_feature_names(s: dict, folds: list) -> list[str]:
     elif mode == "intrinsic":
         names = [f"PC{i+1}" for i in range(n_feat)]
     elif mode == "combined":
-        names = celltype + [f"PC{i+1}" for i in range(n_feat - len(celltype))]
+        names = [f"PC{i+1}" for i in range(n_feat - len(celltype))]+celltype
     else:
         names = [f"feat_{i}" for i in range(n_feat)]
 
