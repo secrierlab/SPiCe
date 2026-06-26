@@ -102,6 +102,7 @@ If you use SPiCe in your research, please cite:
 ## Tutorial
 
 See [tutorial.md](tutorial.md) for a step-by-step guide covering the full pipeline, feature modes, explanations and plotting.
+spice_example.ipynb has an example adata file to replicate the analysis. 
 
 ## Licence
 
