@@ -22,12 +22,20 @@ def run_baseline_core(
         "MLP": [], "MLP + Neighbours": [],
     }
 
+    # X, y and spatial coordinates come from the same adata/graph for every
+    # fold and don't depend on the train/test split, so the neighbour-
+    # augmented feature matrix is built once and reused — only the masks
+    # (and therefore the train/test slices and fitted classifiers) differ
+    # per fold.
+    X, y, coords, _, _ = _extract(fold_datasets[0], graph)
+    X_aug = _augment(X, coords, k)
+
     for fold_data in fold_datasets:
-        X, y, coords, train_mask, test_mask = _extract(fold_data, graph)
+        train_mask = fold_data.train_mask.cpu().numpy()
+        test_mask = fold_data.test_mask.cpu().numpy()
         nc = len(np.unique(y[train_mask]))
         Xtr, Xte = X[train_mask], X[test_mask]
         ytr, yte = y[train_mask], y[test_mask]
-        X_aug = _augment(X, coords, k)
         Xtr_a, Xte_a = X_aug[train_mask], X_aug[test_mask]
 
         for name, clf, Xtr_, Xte_ in [

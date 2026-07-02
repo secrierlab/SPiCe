@@ -70,7 +70,11 @@ def train_model(
 
         loss.backward()
         optimizer.step()
-        loss_history.append(loss.item())
+        # Keep the loss on-device and defer the host sync: `.item()` every
+        # epoch forces the GPU queue to flush at that point. Stacking and
+        # transferring once after the loop gives the identical float values
+        # without `num_epochs` separate synchronisations.
+        loss_history.append(loss.detach())
 
         if epoch % log_interval == 0 or epoch == num_epochs - 1:
             model.eval()
@@ -117,5 +121,5 @@ def train_model(
         "best_performance": best_perf,
         "model": model,
         "predictions": best_preds,
-        "loss_history": loss_history,
+        "loss_history": torch.stack(loss_history).cpu().tolist(),
     }

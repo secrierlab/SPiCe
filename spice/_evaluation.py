@@ -43,18 +43,23 @@ def _eval_multiclass(probs, all_true, n_classes):
     records = []
     for fold, (p, t) in enumerate(zip(probs, all_true)):
         t_bin = label_binarize(t, classes=list(range(n_classes)))
-        for c in range(n_classes):
-            fpr, tpr, _ = roc_curve(t_bin[:, c], p[:, c])
+
+        # roc_curve(t_bin[:, c], p[:, c]) is deterministic for a given class,
+        # so compute it once per class and reuse it for the per-class AUC,
+        # the macro-average FPR grid and the macro-average TPR interpolation
+        # (previously recomputed three times each, with identical inputs).
+        per_class_curves = [roc_curve(t_bin[:, c], p[:, c]) for c in range(n_classes)]
+
+        for c, (fpr, tpr, _) in enumerate(per_class_curves):
             records.append({"fold": fold + 1, "class": str(c), "AUC": auc(fpr, tpr)})
+
         fpr_mi, tpr_mi, _ = roc_curve(t_bin.ravel(), p.ravel())
         records.append({"fold": fold + 1, "class": "micro", "AUC": auc(fpr_mi, tpr_mi)})
-        all_fpr = np.unique(np.concatenate(
-            [roc_curve(t_bin[:, c], p[:, c])[0] for c in range(n_classes)]
-        ))
+
+        all_fpr = np.unique(np.concatenate([fpr for fpr, _, _ in per_class_curves]))
         mean_tpr = np.zeros_like(all_fpr)
-        for c in range(n_classes):
-            f_c, t_c, _ = roc_curve(t_bin[:, c], p[:, c])
-            mean_tpr += np.interp(all_fpr, f_c, t_c)
+        for fpr, tpr, _ in per_class_curves:
+            mean_tpr += np.interp(all_fpr, fpr, tpr)
         mean_tpr /= n_classes
         records.append({"fold": fold + 1, "class": "macro", "AUC": auc(all_fpr, mean_tpr)})
     return pd.DataFrame(records)

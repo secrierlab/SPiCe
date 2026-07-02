@@ -5,12 +5,11 @@ import pandas as pd
 import torch
 from scipy.stats import mannwhitneyu, ttest_ind
 from tqdm import tqdm
-from sklearn.inspection import permutation_importance
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import roc_auc_score
 from sklearn.neighbors import NearestNeighbors
-from sklearn.neural_network import MLPClassifier
-import shap
+# `shap` is imported lazily inside explain_baselines_core (the only place
+# that uses it) since it's a heavy, optional import — this keeps
+# `spice.tl.explain_nodes` / `explain_edges` free of that cost.
 
 
 
@@ -177,8 +176,6 @@ def _augment(X, coords, k):
     nmean = X[idx[:, 1:]].sum(axis=1)
     return np.hstack([X, nmean])
 
-import shap
-
 def explain_baselines_core(
     fold_datasets: list,
     graph,
@@ -192,12 +189,20 @@ def explain_baselines_core(
     each label (features × labels): positive pushes cells toward that label,
     negative away.
     """
+    import shap  # lazy: heavy optional dependency, only needed here
+
     importances = []
 
+    # X, y and spatial coordinates don't depend on the fold split (same
+    # adata/graph every time), so the neighbour-augmented feature matrix is
+    # built once and reused — only the train/test masks vary per fold.
+    X, y, coords, _, _ = _extract(fold_datasets[0], graph)
+    X_aug = _augment(X, coords, k)
+    names = _feature_names(X.shape[1], True, feature_names)
+
     for fold_data in fold_datasets:
-        X, y, coords, train_mask, test_mask = _extract(fold_data, graph)
-        X_aug = _augment(X, coords, k)
-        names = _feature_names(X.shape[1], True, feature_names)
+        train_mask = fold_data.train_mask.cpu().numpy()
+        test_mask = fold_data.test_mask.cpu().numpy()
 
         Xtr, Xte = X_aug[train_mask], X_aug[test_mask]
         ytr, yte = y[train_mask], y[test_mask]

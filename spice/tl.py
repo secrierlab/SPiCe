@@ -312,9 +312,25 @@ def cross_validate(
     G = _require(adata, "graph", "build_graph")
     params = _spice(adata)["params"]
 
-    from spice.dataset import SpatialGNNDataset
+    from spice.dataset import SpatialGNNDataset, _build_shared_data
     from spice.models import SpatialGCN
     from spice.train import train_model as _train
+
+    # Node features, labels and edges don't depend on the fold split, so
+    # build them once and reuse across all `num_folds` folds instead of
+    # recomputing identical work in every iteration (only the train/test
+    # masks are fold-specific).
+    shared = _build_shared_data(
+        adata, G,
+        feature_mode=feature_mode,
+        celltype_key=params["celltype_key"],
+        label_key=params["label_key"],
+        score_key=params["score_key"],
+        pca_key=pca_key,
+        n_pcs=n_pcs,
+        continuous_y=continuous_y,
+        edge_weights=True,
+    )
 
     folds = []
     for i in range(1, num_folds + 1):
@@ -330,6 +346,7 @@ def cross_validate(
             inductive_split=inductive_split,
             fold_idx=i,
             num_folds=num_folds,
+            _shared=shared,
         )
         folds.append(ds[0])
 
