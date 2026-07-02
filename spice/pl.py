@@ -85,10 +85,13 @@ def node_importance(
     save: str | None = None,
     figsize: tuple[float, float] | None = None,
 ) -> tuple[plt.Figure, np.ndarray]:
-    """Scatter plot of node-level feature importance p-values.
+    """Bubble plot of node-level feature importance p-values.
 
-    Significant features (p < *alpha*) are shown in red, non-significant
-    in grey.
+    Only features with a positive mean effect (i.e. a positive association
+    with the label) are shown. Among these, significant features
+    (p < *alpha*) are shown in red — darker shading means a smaller
+    p-value — while non-significant features are grey. A colour bar shows
+    the p-value scale for the significant (red) points.
 
     Parameters
     ----------
@@ -110,42 +113,48 @@ def node_importance(
     """
     _apply_style()
     pvals = _require(adata, "node_pvalues", "explain_nodes")
-    qvals = _require(adata, "node_qvalues", "explain_nodes")  
+    qvals = _require(adata, "node_qvalues", "explain_nodes")
+    imp = _require(adata, "node_importance", "explain_nodes")
+    means = imp.pivot(index="label", columns="feature", values="mean")
+    means = means.reindex(index=pvals.index, columns=pvals.columns)
 
     state_map = state_map or {}
-    red_cmap = plt.get_cmap("Reds")
+    red_cmap = plt.get_cmap("Reds").reversed()  # darker = smaller p-value
+    norm = mcolors.Normalize(vmin=0, vmax=alpha)
 
     n_states = len(pvals)
     n_cols = min(n_states, 2)
     n_rows = int(np.ceil(n_states / n_cols))
     if figsize is None:
-        figsize = (6.5 * n_cols, 4 * n_rows)
+        figsize = (6.5 * n_cols + 1.2, 4 * n_rows)
 
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize)
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize, constrained_layout=True)
     axes = np.atleast_1d(axes).flatten()
 
     for idx, (label, row) in enumerate(pvals.iterrows()):
         ax = axes[idx]
-        p_arr = row.values.astype(float)
-        x = np.arange(len(p_arr))
+        name = state_map.get(label, str(label))
+        ax.set_title(name, fontsize=12, fontweight="bold")
 
-        colors = []
-        sizes = []
-        for p in p_arr:
-            if p < alpha:
-                norm = mcolors.Normalize(vmin=0, vmax=alpha)
-                colors.append(red_cmap(1 - norm(p)))
-                sizes.append(60)
-            else:
-                colors.append("#bdbdbd")
-                sizes.append(30)
+        pos = means.loc[label].astype(float) > 0  # keep positive associations only
+        p_arr = row[pos].values.astype(float)
+        feat_names = row[pos].index
+
+        if len(p_arr) == 0:
+            ax.set_axis_off()
+            ax.text(0.5, 0.5, "No positive associations", ha="center", va="center",
+                     fontsize=9, color="#999999", transform=ax.transAxes)
+            continue
+
+        x = np.arange(len(p_arr))
+        sig = p_arr < alpha
+        colors = np.where(sig, np.array([mcolors.to_hex(red_cmap(norm(p))) for p in p_arr]), "#bdbdbd")
+        sizes = np.where(sig, 60, 30)
 
         neg_log_p = -np.log10(p_arr + 1e-300)  # avoid log(0)
         ax.scatter(x, neg_log_p, c=colors, s=sizes, edgecolors="white", linewidths=0.4, zorder=3)
         ax.set_xticks(x)
-        ax.set_xticklabels(pvals.columns, rotation=90, fontsize=7)
-        name = state_map.get(label, str(label))
-        ax.set_title(name, fontsize=12, fontweight="bold")
+        ax.set_xticklabels(feat_names, rotation=90, fontsize=7)
         ax.set_ylabel("$-\\log_{10}(p)$")
         ax.axhline(-np.log10(alpha), ls="--", lw=0.8, color="#999999", alpha=0.6)
         _despine(ax)
@@ -153,7 +162,13 @@ def node_importance(
     for j in range(idx + 1, len(axes)):
         axes[j].set_visible(False)
 
-    fig.tight_layout()
+    sm = cm.ScalarMappable(cmap=red_cmap, norm=norm)
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=axes[: idx + 1].tolist(), shrink=0.6, pad=0.03, aspect=20)
+    cbar.ax.invert_yaxis()  # most significant (smallest p) at the top
+    cbar.set_label("$p$-value", fontsize=8)
+    cbar.ax.tick_params(labelsize=7)
+
     if save:
         fig.savefig(save, bbox_inches="tight", dpi=300)
     return fig, axes
