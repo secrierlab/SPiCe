@@ -480,6 +480,14 @@ def auc_per_class(
         if state in means.index:
             ax.hlines(means[state], i - 0.3, i + 0.3, colors="k", linewidth=2, zorder=4)
 
+    # AUC is bounded to [0, 1] by definition. Without a fixed range,
+    # matplotlib's automatic tick formatter can zoom in on tightly
+    # clustered near-1.0 values and switch to an offset/scientific
+    # notation (e.g. "1e-5+9.999e-1"), which makes negligible 5th-decimal
+    # differences look like huge swings. Pin the axis instead.
+    ax.set_ylim(0, 1.02)
+    ax.ticklabel_format(useOffset=False, style="plain", axis="y")
+
     ax.set_ylabel("AUC")
     ax.set_xlabel("")
     ax.set_box_aspect(1)
@@ -660,6 +668,13 @@ def auc_dotplot(
     )
     ax.set_xticks(x)
     ax.set_xticklabels(grouped.index, rotation=90, fontsize=8)
+
+    # Same fix as auc_per_class: pin the axis to AUC's valid [0, 1] range
+    # so matplotlib doesn't fall back to a misleading offset/scientific
+    # notation when values cluster tightly near 1.0.
+    ax.set_ylim(0, 1.02)
+    ax.ticklabel_format(useOffset=False, style="plain", axis="y")
+
     ax.set_ylabel("AUC")
     ax.set_box_aspect(1)
     _despine(ax)
