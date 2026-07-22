@@ -262,8 +262,7 @@ def node_importance_signed(
                    ms=8, label="Positive effect"),
         plt.Line2D([0], [0], marker="o", ls="", mfc=neg_color, mec="black",
                    ms=8, label="Negative effect"),
-        plt.Line2D([0], [0], marker="o", ls="", mfc="#bdbdbd", mec="white",
-                   ms=8, label="n.s."),
+
     ]
     fig.legend(handles=handles, loc="upper right", frameon=False, fontsize=9)
     fig.tight_layout()
@@ -285,7 +284,8 @@ def edge_network(
     max_width: float = 6.0,
     save: str | None = None,
     figsize: tuple[float, float] = (7, 7),
-) -> tuple[plt.Figure, plt.Axes] | list[tuple[plt.Figure, plt.Axes]]:
+    return_data: bool = False,
+) -> tuple[plt.Figure, plt.Axes] | list[tuple[plt.Figure, plt.Axes]] | pd.DataFrame:
     """Circular network of significant cell-type interactions.
 
     Edge widths are normalised to the range [*min_width*, *max_width*]
@@ -296,8 +296,7 @@ def edge_network(
     adata
         Annotated data matrix (requires ``spice.tl.explain_edges``).
     state
-        Plot a single state label.  ``None`` plots all states, returning
-        a list of (fig, ax) tuples.
+        Plot a single state label.  ``None`` plots all states.
     state_map
         Readable label names.
     alpha
@@ -308,10 +307,14 @@ def edge_network(
         Path prefix — ``"dir/edge"`` produces ``dir/edge_EPI.pdf`` etc.
     figsize
         Figure size.
+    return_data
+        If ``True``, return the pooled significant-edge table instead of
+        the figure(s).
 
     Returns
     -------
-    ``(fig, ax)`` or list thereof.
+    ``(fig, ax)``, a list thereof, or — when ``return_data`` — a tidy
+    ``DataFrame`` of significant edges across the requested states.
     """
     _apply_style()
     edge_dict = _require(adata, "edge_explanations", "explain_edges")
@@ -319,30 +322,25 @@ def edge_network(
 
     labels = [state] if state is not None else list(edge_dict.keys())
     outputs = []
+    frames = []
 
     for lbl in labels:
         df = edge_dict[lbl].copy()
         if isinstance(df["cell_type_pair"].iloc[0], str):
             df["cell_type_pair"] = df["cell_type_pair"].apply(ast.literal_eval)
-        df[["ct1", "ct2"]] = pd.DataFrame(
-            df["cell_type_pair"].tolist(),
-            index=df.index,
-        )
+        df[["ct1", "ct2"]] = pd.DataFrame(df["cell_type_pair"].tolist(), index=df.index)
         df_sig = df[df["p_value"] < alpha]
 
         name = state_map.get(lbl, str(lbl))
+        frames.append(df_sig.assign(label=lbl, state=name))
+
         fig, ax = plt.subplots(figsize=figsize)
 
         if df_sig.empty:
             ax.text(
-                0.5,
-                0.5,
-                f"No significant edges (p < {alpha})",
-                transform=ax.transAxes,
-                ha="center",
-                va="center",
-                fontsize=12,
-                color="#666666",
+                0.5, 0.5, f"No significant edges (p < {alpha})",
+                transform=ax.transAxes, ha="center", va="center",
+                fontsize=12, color="#666666",
             )
             ax.set_title(name, fontsize=14, fontweight="bold")
             ax.axis("off")
@@ -353,14 +351,11 @@ def edge_network(
         for _, row in df_sig.iterrows():
             G_net.add_edge(row["ct1"], row["ct2"], weight=row["mean_importance_target"])
 
-        # Use shell layout for cleaner spacing with few nodes,
-        # fall back to kamada_kawai for larger graphs
         if G_net.number_of_nodes() <= 8:
             pos = nx.shell_layout(G_net)
         else:
             pos = nx.kamada_kawai_layout(G_net)
 
-        # Normalise edge widths to a sensible range
         weights = np.array([G_net[u][v]["weight"] for u, v in G_net.edges()])
         if weights.max() == weights.min():
             widths = np.full_like(weights, (min_width + max_width) / 2)
@@ -369,7 +364,6 @@ def edge_network(
                 max_width - min_width
             )
 
-        # Colour edges by importance
         edge_cmap = plt.get_cmap("YlOrRd")
         if weights.max() == weights.min():
             edge_colors = [edge_cmap(0.5)] * len(weights)
@@ -379,17 +373,11 @@ def edge_network(
 
         nx.draw_networkx_edges(G_net, pos, ax=ax, width=widths, edge_color=edge_colors, alpha=0.7)
         nx.draw_networkx_nodes(
-            G_net,
-            pos,
-            ax=ax,
-            node_size=1200,
-            node_color="white",
-            linewidths=2,
-            edgecolors=CB_PALETTE[0],
+            G_net, pos, ax=ax, node_size=1200, node_color="white",
+            linewidths=2, edgecolors=CB_PALETTE[0],
         )
         nx.draw_networkx_labels(G_net, pos, ax=ax, font_size=9, font_weight="bold")
 
-        # Continuous colorbar legend
         sm = cm.ScalarMappable(
             cmap=edge_cmap,
             norm=mcolors.Normalize(vmin=weights.min(), vmax=weights.max()),
@@ -408,12 +396,12 @@ def edge_network(
             fig.savefig(f"{save}_{safe}.pdf", bbox_inches="tight", dpi=300)
         outputs.append((fig, ax))
 
+    if return_data:
+        return pd.concat(frames, ignore_index=True)
+
     if state is not None:
         return outputs[0]
-    # When plotting all states, figures are already shown — return None
-    # to avoid Jupyter printing a list of (fig, ax) tuples.
     return None
-
 
 # ──────────────────────────────────────────────────────────────────────
 # 3.  AUC per class

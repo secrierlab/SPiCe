@@ -435,7 +435,7 @@ def explain_nodes(
     seed: int | None = None,
     ig_steps: int = 50,
     top_n: int = 15,
-    verbose: bool = True,
+    verbose: bool = False,
     copy: bool = False,
 ) -> AnnData | None:
     """Node feature importance via Integrated Gradients, pooled across folds.
