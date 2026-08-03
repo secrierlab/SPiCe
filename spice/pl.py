@@ -755,3 +755,102 @@ def compare_runs(
     if save:
         fig.savefig(save, bbox_inches="tight", dpi=300)
     return fig, ax
+
+def baseline_significance(
+    adata,
+    reference: str = "GNN",
+    stat: str = "wilcoxon",
+    alpha: float = 0.05,
+    order: list[str] | None = None,
+    save: str | None = None,
+    figsize: tuple[float, float] = (7, 5),
+) -> tuple[plt.Figure, plt.Axes]:
+    """Per-fold AUC per model with paired-test significance brackets.
+
+    Reads per-fold AUCs from ``run_baseline`` and paired-test results from
+    ``compare_baselines``. Brackets compare each baseline to *reference*.
+
+    Parameters
+    ----------
+    stat
+        Which stored p-value to annotate: ``"wilcoxon"`` or ``"ttest"``
+        (uses the BH-corrected q-value).
+    """
+    _apply_style()
+    _, results = _require(adata, "baseline", "run_baseline")
+    tests = _require(adata, "baseline_tests", "compare_baselines")
+
+    qcol = f"{stat}_q"
+    if qcol not in tests.columns:
+        raise KeyError(f"'{qcol}' not in baseline_tests; stat must be 'wilcoxon' or 'ttest'.")
+
+    # Model order: reference first, then by descending mean AUC
+    means = {m: np.mean(v) for m, v in results.items()}
+    if order is None:
+        order = [reference] + sorted(
+            [m for m in results if m != reference],
+            key=lambda m: means[m], reverse=True,
+        )
+    pos = {m: i for i, m in enumerate(order)}
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Box + jittered per-fold points
+    data = [np.asarray(results[m], dtype=float) for m in order]
+    bp = ax.boxplot(data, positions=range(len(order)), widths=0.55,
+                    patch_artist=True, showfliers=False, zorder=1)
+    for i, box in enumerate(bp["boxes"]):
+        c =  "#B8B8B8"
+        box.set(facecolor=c, alpha=0.35, edgecolor=c, linewidth=1.5)
+    for key in ("whiskers", "caps", "medians"):
+        for ln in bp[key]:
+            ln.set(color="#555555", linewidth=1.2)
+
+    rng = np.random.default_rng(0)
+    for m in order:
+        y = np.asarray(results[m], dtype=float)
+        x = pos[m] + rng.uniform(-0.12, 0.12, size=len(y))
+        ax.scatter(x, y, s=22, color="#333333", zorder=3, alpha=0.8)
+
+    ax.axhline(0.5, ls="--", lw=1, color="#999999", zorder=0)  # chance
+
+    # Significance brackets: reference vs each other, stacked
+    def stars(q):
+        if q < 0.001: return "***"
+        if q < 0.01:  return "**"
+        if q < alpha: return "*"
+        return "n.s."
+
+    ymax = max(np.max(d) for d in data)
+    ymin = min(np.min(d) for d in data)
+    span = ymax - ymin or 1.0
+    step = span * 0.12
+    level = 0
+    ref_x = pos[reference]
+    others = [m for m in order if m != reference]
+    for m in others:
+        row = tests[tests["comparison"] == f"{reference} vs {m}"]
+        if row.empty:
+            continue
+        q = float(row[qcol].iloc[0])
+        x1, x2 = sorted((ref_x, pos[m]))
+        y = ymax + step * (level + 1)
+        ax.plot([x1, x1, x2, x2], [y - step * 0.15, y, y, y - step * 0.15],
+                lw=1.2, color="#333333")
+        ax.text((x1 + x2) / 2, y, stars(q), ha="center", va="bottom",
+                fontsize=11, color="#333333")
+        level += 1
+
+    ax.set_xticks(range(len(order)))
+    ax.set_xticklabels(order, rotation=30, ha="right")
+    ax.set_ylabel("AUC")
+    ax.set_ylim(min(0.45, ymin - step), ymax + step * (level + 1.5))
+    n_folds = len(next(iter(results.values())))
+    ax.set_title(f"Per-fold AUC",
+                 fontsize=11)
+    ax.spines[["top", "right"]].set_visible(False)
+    fig.tight_layout()
+
+    if save:
+        fig.savefig(save, bbox_inches="tight", dpi=300)
+    return fig, ax

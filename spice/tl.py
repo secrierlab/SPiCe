@@ -823,3 +823,77 @@ def sanitize(
 
     return adata if copy else None
 
+def compare_baselines(
+    adata: AnnData,
+    reference: str = "GNN",
+    alpha: float = 0.05,
+    verbose: bool = True,
+    copy: bool = False,
+) -> AnnData | None:
+    """Paired significance tests of *reference* against each baseline.
+
+    Uses the per-fold AUCs stored by :func:`run_baseline`. Folds are shared
+    across models, so tests are paired: Wilcoxon signed-rank (primary,
+    distribution-free) and paired t-test (secondary), BH-corrected across
+    the compared baselines.
+
+    Stored keys
+    -----------
+    ``adata.uns['spice']['baseline_tests']``
+        DataFrame of per-comparison statistics.
+    """
+    from scipy.stats import wilcoxon, ttest_rel
+    from statsmodels.stats.multitest import multipletests
+
+    adata = adata.copy() if copy else adata
+    _, results = _require(adata, "baseline", "run_baseline")
+
+    if reference not in results:
+        raise KeyError(f"'{reference}' not in baseline results: {list(results)}")
+
+    ref = np.asarray(results[reference], dtype=float)
+    rows = []
+    for name, aucs in results.items():
+        if name == reference:
+            continue
+        other = np.asarray(aucs, dtype=float)
+        if other.shape != ref.shape:
+            raise ValueError(
+                f"Fold count mismatch: {reference} has {ref.shape[0]}, "
+                f"{name} has {other.shape[0]} — cannot pair."
+            )
+        diff = ref - other
+        wins = int((diff > 0).sum())
+        if np.allclose(diff, 0):
+            w_p = t_p = 1.0
+            w_stat = t_stat = np.nan
+        else:
+            w_stat, w_p = wilcoxon(ref, other)
+            t_stat, t_p = ttest_rel(ref, other)
+        rows.append({
+            "comparison": f"{reference} vs {name}",
+            "n_folds": ref.shape[0],
+            "mean_ref": ref.mean(),
+            "mean_other": other.mean(),
+            "median_delta": float(np.median(diff)),
+            "mean_delta": float(diff.mean()),
+            "wins": wins,
+            "wilcoxon_stat": w_stat,
+            "wilcoxon_p": w_p,
+            "ttest_stat": t_stat,
+            "ttest_p": t_p,
+        })
+
+    df = pd.DataFrame(rows)
+    df["wilcoxon_q"] = multipletests(df["wilcoxon_p"], method="fdr_bh")[1]
+    df["ttest_q"] = multipletests(df["ttest_p"], method="fdr_bh")[1]
+    df = df.sort_values("mean_delta", ascending=False).reset_index(drop=True)
+
+    if verbose:
+        show = ["comparison", "mean_ref", "mean_other", "median_delta",
+                "wins", "n_folds", "wilcoxon_p", "wilcoxon_q"]
+        print(f"\n  Paired tests vs {reference} (Wilcoxon signed-rank, BH-corrected)")
+        print(df[show].to_string(index=False))
+
+    _spice(adata)["baseline_tests"] = df
+    return adata if copy else None

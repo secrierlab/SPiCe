@@ -82,3 +82,5 @@ def _augment(X, coords, k):
     # Vectorised neighbour feature sum (replaces per-cell Python loop)
     nmean = X[idx[:, 1:]].sum(axis=1)
     return np.hstack([X, nmean])
+
+
